@@ -1,0 +1,28 @@
+services:
+  ai-radio:
+    build: .
+    container_name: ai-radio-247
+    # network_mode: host  # Removido para compatibilidad con Ollama
+    volumes:
+      - ./data:/app/data  # Persistencia de estado
+      - ./runtime:/app/runtime  # Archivos de voz generados
+      - ./assets:/app/assets  # Música y otros assets
+      - ./.env:/app/.env  # Variables de entorno
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - OBS_HOST=host.docker.internal  # Para conectar a OBS en el host desde bridge network
+    depends_on:
+      - ollama
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  ollama_data:

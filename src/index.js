@@ -5,8 +5,10 @@ import { fileURLToPath } from 'url';
 import schedule from 'node-schedule';
 import OBSWebSocket from 'obs-websocket-js';
 import tmi from 'tmi.js';
-import { YoutubeChat } from 'youtube-chat';
+import youtubeChatPkg from 'youtube-chat';
+const { YoutubeChat } = youtubeChatPkg;
 import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,6 +27,7 @@ await fs.ensureDir(MUSIC_DIR);
 // ENV
 const {
   OPENAI_API_KEY,
+  ANTHROPIC_API_KEY,
   TEXT_MODEL = 'gpt-4o-mini',
   VOICE_MODEL = 'gpt-4o-mini-tts',
   TWITCH_USERNAME,
@@ -38,7 +41,8 @@ const {
   LANG = 'es'
 } = process.env;
 
-const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+const openai = OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY }) : new OpenAI({ baseURL: 'http://host.docker.internal:11434/v1', apiKey: 'ollama' });
+const anthropic = ANTHROPIC_API_KEY ? new Anthropic({ apiKey: ANTHROPIC_API_KEY }) : null;
 
 function log(...args) {
   const ts = new Date().toISOString();
@@ -58,37 +62,88 @@ async function connectOBS() {
 
 // TTS
 async function synthVoiceToFile(text, outputPath) {
-  if (!OPENAI_API_KEY) {
-    log('OPENAI_API_KEY no configurada; simulando audio.');
-    await fs.writeFile(outputPath, '');
+  // Forzar uso de Piper por ahora
+  if (true) {
+    log('Usando Piper TTS.');
+    const { exec } = await import('child_process');
+    const escapedText = text.replace(/"/g, '\\"').replace(/\$/g, '\\$');
+    await new Promise((resolve, reject) => {
+      exec(`echo "${escapedText}" | /usr/local/bin/piper --model /app/models/es_ES-mls_9972-medium.onnx --output_file ${outputPath}`, { cwd: '/app' }, (error, stdout, stderr) => {
+        if (error) {
+          log('Error Piper TTS:', error.message);
+          reject(error);
+        } else {
+          resolve();
+        }
+      });
+    });
     return;
   }
-  // Usa la API TTS de OpenAI (Audio Speech) disponible en el SDK v4
-  const speech = await openai.audio.speech.create({
-    model: VOICE_MODEL,
-    voice: 'alloy',
-    input: text,
-    format: 'mp3',
-    language: LANG
-  });
-  const buffer = Buffer.from(await speech.arrayBuffer());
-  await fs.writeFile(outputPath, buffer);
+  if (!OPENAI_API_KEY) {
+    log('OPENAI_API_KEY no configurada; usando Piper TTS.');
+    const { exec } = await import('child_process');
+    const escapedText = text.replace(/"/g, '\\"').replace(/\$/g, '\\$');
+    await new Promise((resolve, reject) => {
+      exec(`echo "${escapedText}" | /usr/local/bin/piper --model /app/models/es_ES-mls_9972-medium.onnx --output_file ${outputPath}`, { cwd: '/app' }, (error, stdout, stderr) => {
+        if (error) {
+          log('Error Piper TTS:', error.message);
+          reject(error);
+        } else {
+          resolve();
+        }
+      });
+    });
+    return;
+  }
+  try {
+    // Usa la API TTS de OpenAI (Audio Speech) disponible en el SDK v4
+    const speech = await openai.audio.speech.create({
+      model: VOICE_MODEL,
+      voice: 'alloy',
+      input: text,
+      format: 'mp3',
+      language: LANG
+    });
+    const buffer = Buffer.from(await speech.arrayBuffer());
+    await fs.writeFile(outputPath, buffer);
+  } catch (e) {
+    log('Error TTS OpenAI:', e.message);
+    await fs.writeFile(outputPath, ''); // Simula archivo vacío
+  }
 }
 
 // Content generation
 async function genTextPrompt(system, user) {
-  if (!OPENAI_API_KEY) {
-    return `Simulación: ${user}`;
+  if (anthropic) {
+    try {
+      const resp = await anthropic.messages.create({
+        model: 'claude-3-5-sonnet-20241022',
+        max_tokens: 1000,
+        system: system,
+        messages: [{ role: 'user', content: user }],
+      });
+      return resp.content[0]?.text?.trim() || '';
+    } catch (e) {
+      log('Error Anthropic:', e.message);
+    }
   }
-  const resp = await openai.chat.completions.create({
-    model: TEXT_MODEL,
-    messages: [
-      { role: 'system', content: system },
-      { role: 'user', content: user }
-    ],
-    temperature: 0.8,
-  });
-  return resp.choices[0]?.message?.content?.trim() || '';
+  if (openai) {
+    try {
+      const model = OPENAI_API_KEY ? TEXT_MODEL : 'llama3.2:3b';
+      const resp = await openai.chat.completions.create({
+        model: model,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user }
+        ],
+        temperature: 0.8,
+      });
+      return resp.choices[0]?.message?.content?.trim() || '';
+    } catch (e) {
+      log('Error OpenAI/Ollama:', e.message);
+    }
+  }
+  return `Simulación: ${user}`;
 }
 
 // Twitch Chat
@@ -140,6 +195,8 @@ function connectYouTube() {
 
 // Speak: genera TTS y notifica OBS
 async function speak(text) {
+  log(`Generando voz para: ${text.substring(0, 100)}...`);
+  await fs.writeFile(path.join(VOICE_DIR, 'latest.txt'), text);
   try {
     await synthVoiceToFile(text, VOICE_FILE);
     // Para OBS: si la fuente de audio "Voz" está apuntando a VOICE_FILE y con "reiniciar al cambiar archivo",
@@ -186,6 +243,7 @@ async function blockRadioNovela() {
     `Escribe el capítulo ${state.chapter} de la radionovela "Sombras en la Ciudad" (300-450 palabras).`
   );
   await speak(script);
+  await fs.writeFile(path.join(DATA_DIR, `chapter${state.chapter}.txt`), script);
   state.chapter += 1;
   await fs.writeJSON(statePath, state, { spaces: 2 });
 }
@@ -233,8 +291,8 @@ async function main() {
   connectYouTube();
   setupSchedule();
 
-  // Al inicio, lanza una apertura de bienvenida
-  await blockOpen();
+  // Al inicio, lanza un capítulo de radionovela para probar
+  await blockRadioNovela();
 }
 
 process.on('unhandledRejection', (r) => log('unhandledRejection', r));

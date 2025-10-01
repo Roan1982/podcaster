@@ -17,8 +17,8 @@ Este proyecto crea un canal 24/7 con programación por bloques (cada 30 o 60 min
 
 1. Software
    - Windows 10/11.
-   - Node.js 20+ (https://nodejs.org) y npm.
-   - OBS Studio 29+ (https://obsproject.com/).
+   - Docker y Docker Compose (https://docs.docker.com/get-docker/).
+   - OBS Studio 29+ (https://obsproject.com/) - debe ejecutarse en el host, no en contenedor.
 2. OBS WebSocket
    - OBS 29+ ya trae WebSocket. Habilitarlo en:
      - Herramientas > OBS WebSocket Server Settings.
@@ -43,11 +43,8 @@ Este proyecto crea un canal 24/7 con programación por bloques (cada 30 o 60 min
 ## Configuración del proyecto
 
 1. Clonar este repo o usar la carpeta actual.
-2. Instalar Node.js (si no lo tienes). Verifica con:
-   - cmd: node -v y npm -v
-3. Instalar dependencias (cuando agreguemos package.json):
-   - npm install
-4. Copia .env.example a .env y completa valores:
+2. Instalar Docker y Docker Compose (si no los tienes).
+3. Copia .env.example a .env y completa valores:
    - OPENAI_API_KEY=...
    - TWITCH_USERNAME=...
    - TWITCH_OAUTH_TOKEN=oauth:...
@@ -59,6 +56,24 @@ Este proyecto crea un canal 24/7 con programación por bloques (cada 30 o 60 min
    - OBS_PASSWORD=...
    - VOICE_MODEL=gpt-4o-mini-tts
    - TEXT_MODEL=gpt-4o-mini
+
+## Configuración con Docker
+
+Todo el proyecto (excepto OBS) se ejecuta en contenedores Docker. No necesitas instalar Node.js ni dependencias globalmente.
+
+1. Asegúrate de tener Docker y Docker Compose instalados.
+2. Crea las carpetas necesarias: `mkdir data assets/music runtime/voice` (si no existen).
+3. Configura tu `.env` con las APIs (opcional, usa Ollama local gratis).
+4. Construye y ejecuta el contenedor:
+   - `docker-compose up --build` (primera vez, descarga Ollama y modelo ~4GB).
+   - `docker-compose up -d --build` (para producción, en background).
+5. OBS debe ejecutarse en el host (fuera del contenedor) para que el contenedor pueda conectarse vía WebSocket.
+
+**Ollama (gratuito local)**: Si no configuras `OPENAI_API_KEY` ni `ANTHROPIC_API_KEY`, usa Ollama con Llama 3.2 (más lento, ~1-2 min por respuesta, pero gratis y local). El contenedor descarga el modelo automáticamente.
+
+Para detener: `docker-compose down`.
+
+Los volúmenes montados permiten persistencia de datos, audio generado y assets.
 
 ## Programación (Scheduler)
 
@@ -118,10 +133,15 @@ El orquestador cambia escenas o activa/desactiva fuentes, y va reemplazando el a
 
 Para simplificar el primer MVP, comenzaremos con un único archivo `src/index.js` que hace todo, y luego modularizamos.
 
-## Comandos (cuando esté el package.json)
+## Comandos
 
-- Desarrollo: npm run dev (con nodemon)
-- Producción: npm start
+- Desarrollo (sin Docker): npm run dev (con nodemon)
+- Producción (sin Docker): npm start
+- Con Docker:
+  - Construir y ejecutar: `docker-compose up --build`
+  - Ejecutar en background: `docker-compose up -d --build`
+  - Detener: `docker-compose down`
+  - Ver logs: `docker-compose logs -f`
 
 ## Próximos pasos
 
@@ -138,10 +158,11 @@ Para simplificar el primer MVP, comenzaremos con un único archivo `src/index.js
 
 ## Troubleshooting
 
-- "npm no reconocido": instala Node.js desde nodejs.org y reinicia la terminal.
-- OBS no conecta: revisa puerto/contraseña del WebSocket y firewall.
-- No suena la voz: verifica la ruta del archivo y la opción de reinicio al cambiar archivo en la fuente de OBS.
+- "docker no reconocido": instala Docker desde docs.docker.com y reinicia la terminal.
+- OBS no conecta: revisa puerto/contraseña del WebSocket y firewall. Asegúrate de que OBS esté ejecutándose en el host.
+- No suena la voz: verifica la ruta del archivo y la opción de reinicio al cambiar archivo en la fuente de OBS. Los volúmenes deben estar montados correctamente.
 - Chat de YouTube: requiere tener un stream en vivo activo y obtener el Live Chat ID.
+- Errores de permisos en volúmenes: ajusta permisos de las carpetas data/, runtime/, assets/.
 
 ## Aviso
 
