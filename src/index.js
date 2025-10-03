@@ -66,9 +66,10 @@ async function synthVoiceToFile(text, outputPath) {
   if (true) {
     log('Usando Piper TTS.');
     const { exec } = await import('child_process');
-    const escapedText = text.replace(/"/g, '\\"').replace(/\$/g, '\\$');
+    const tempFile = path.join(VOICE_DIR, 'temp_text.txt');
+    await fs.writeFile(tempFile, text);
     await new Promise((resolve, reject) => {
-      exec(`echo "${escapedText}" | /usr/local/bin/piper --model /app/models/es_ES-mls_9972-medium.onnx --output_file ${outputPath}`, { cwd: '/app' }, (error, stdout, stderr) => {
+      exec(`cat "${tempFile}" | /usr/local/bin/piper/piper --model /app/models/es_ES-mls_9972-low.onnx --output_file ${outputPath}`, { cwd: '/app' }, (error, stdout, stderr) => {
         if (error) {
           log('Error Piper TTS:', error.message);
           reject(error);
@@ -77,14 +78,16 @@ async function synthVoiceToFile(text, outputPath) {
         }
       });
     });
+    await fs.remove(tempFile);
     return;
   }
   if (!OPENAI_API_KEY) {
     log('OPENAI_API_KEY no configurada; usando Piper TTS.');
     const { exec } = await import('child_process');
-    const escapedText = text.replace(/"/g, '\\"').replace(/\$/g, '\\$');
+    const tempFile = path.join(VOICE_DIR, 'temp_text.txt');
+    await fs.writeFile(tempFile, text);
     await new Promise((resolve, reject) => {
-      exec(`echo "${escapedText}" | /usr/local/bin/piper --model /app/models/es_ES-mls_9972-medium.onnx --output_file ${outputPath}`, { cwd: '/app' }, (error, stdout, stderr) => {
+      exec(`cat "${tempFile}" | /usr/local/bin/piper/piper --model /app/models/es_ES-mls_9972-low.onnx --output_file ${outputPath}`, { cwd: '/app' }, (error, stdout, stderr) => {
         if (error) {
           log('Error Piper TTS:', error.message);
           reject(error);
@@ -93,6 +96,7 @@ async function synthVoiceToFile(text, outputPath) {
         }
       });
     });
+    await fs.remove(tempFile);
     return;
   }
   try {
@@ -199,14 +203,30 @@ async function speak(text) {
   await fs.writeFile(path.join(VOICE_DIR, 'latest.txt'), text);
   try {
     await synthVoiceToFile(text, VOICE_FILE);
-    // Para OBS: si la fuente de audio "Voz" está apuntando a VOICE_FILE y con "reiniciar al cambiar archivo",
-    // bastará con escribir el archivo. Para mayor control, podemos desactivar/activar fuente.
+    
+    // Detener música antes de reproducir voz (sidechain)
+    await sidechain(true);
+    
+    // Para OBS: activar fuente de voz
     try {
       await obs.call('SetSceneItemEnabled', { sceneName: 'Radio', sceneItemId: await getSceneItemId('Radio', 'Voz'), sceneItemEnabled: true });
     } catch {}
-    log('Voz reproducida.');
+    
+    // Estimar duración del audio (aprox. 150 palabras/minuto = 2.5 palabras/segundo)
+    const wordCount = text.split(/\s+/).length;
+    const estimatedDuration = Math.max(10, Math.min(300, wordCount / 2.5)); // entre 10s y 5min
+    log(`Voz reproducida (${Math.round(estimatedDuration)}s estimados).`);
+    
+    // Reanudar música después de la duración estimada
+    setTimeout(async () => {
+      await sidechain(false);
+      log('Música reanudada después de voz.');
+    }, estimatedDuration * 1000);
+    
   } catch (e) {
     log('Error speak:', e.message);
+    // En caso de error, reanudar música
+    await sidechain(false);
   }
 }
 
@@ -293,6 +313,12 @@ async function main() {
 
   // Al inicio, lanza un capítulo de radionovela para probar
   await blockRadioNovela();
+  
+  // PRUEBA MANUAL: ejecutar otro bloque inmediatamente
+  setTimeout(async () => {
+    log('Ejecutando prueba manual de bloque...');
+    await blockRadioNovela();
+  }, 5000); // 5 segundos después
 }
 
 process.on('unhandledRejection', (r) => log('unhandledRejection', r));

@@ -11,15 +11,14 @@ COPY package*.json ./
 RUN npm install
 
 # Instala Piper TTS
-RUN apk add --no-cache curl tar && \
+RUN apk add --no-cache curl tar gcompat && \
     curl -L https://github.com/rhasspy/piper/releases/download/v1.2.0/piper_amd64.tar.gz -o piper_amd64.tar.gz && \
-    tar -xzf piper_amd64.tar.gz -C /tmp && \
-    mv /tmp/piper/piper /usr/local/bin/piper && \
-    chmod +x /usr/local/bin/piper && \
-    rm -rf /tmp/piper piper_amd64.tar.gz && \
+    tar -xzf piper_amd64.tar.gz -C /usr/local/bin && \
+    chmod +x /usr/local/bin/piper/piper && \
+    rm piper_amd64.tar.gz && \
     mkdir -p /app/models && \
-    curl -L https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/es/es_ES/mls_9972/medium/es_ES-mls_9972-medium.onnx -o /app/models/es_ES-mls_9972-medium.onnx && \
-    curl -L https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/es/es_ES/mls_9972/medium/es_ES-mls_9972-medium.onnx.json -o /app/models/es_ES-mls_9972-medium.onnx.json
+    curl -L https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/es/es_ES/mls_9972/low/es_ES-mls_9972-low.onnx -o /app/models/es_ES-mls_9972-low.onnx && \
+    curl -L https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/es/es_ES/mls_9972/low/es_ES-mls_9972-low.onnx.json -o /app/models/es_ES-mls_9972-low.onnx.json
 
 # Copia el código fuente
 COPY src/ ./src/
